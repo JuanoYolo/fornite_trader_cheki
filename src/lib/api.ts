@@ -1,18 +1,51 @@
-const API_BASE = import.meta.env.VITE_API_BASE || '';
+const rawApiBase = import.meta.env.VITE_API_BASE || "";
+const API_BASE = rawApiBase.replace(/\/+$/, "");
+
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers || {}),
-    },
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || res.statusText);
+  const target = `${API_BASE}${path}`;
+
+  let response: Response;
+  try {
+    response = await fetch(target, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options?.headers || {}),
+      },
+    });
+  } catch (error) {
+    throw new ApiError(
+      `No se pudo conectar con la API (${target}). Revisa VITE_API_BASE y el Worker.`,
+      0
+    );
   }
-  return res.json();
+
+  const payload = await response.text();
+  let data: any = null;
+  if (payload) {
+    try {
+      data = JSON.parse(payload);
+    } catch {
+      data = { message: payload };
+    }
+  }
+
+  if (!response.ok) {
+    const message = data?.error || data?.message || response.statusText || "API request failed";
+    throw new ApiError(message, response.status);
+  }
+
+  return data as T;
 }
 
 export interface JoinResponse {
@@ -60,8 +93,8 @@ export interface TradeResult {
 
 export const api = {
   join(room_code: string, display_name: string, pin: string) {
-    return request<JoinResponse>('/api/room/join', {
-      method: 'POST',
+    return request<JoinResponse>("/api/room/join", {
+      method: "POST",
       body: JSON.stringify({ room_code, display_name, pin }),
     });
   },
@@ -71,19 +104,21 @@ export const api = {
   },
 
   state(room_code: string, player_code: string) {
-    return request<RoomState>(`/api/room/state?room_code=${encodeURIComponent(room_code)}&player_code=${encodeURIComponent(player_code)}`);
+    return request<RoomState>(
+      `/api/room/state?room_code=${encodeURIComponent(room_code)}&player_code=${encodeURIComponent(player_code)}`
+    );
   },
 
   buy(room_code: string, player_code: string, coin: string, qty: number) {
-    return request<TradeResult>('/api/trade/buy', {
-      method: 'POST',
+    return request<TradeResult>("/api/trade/buy", {
+      method: "POST",
       body: JSON.stringify({ room_code, player_code, coin, qty }),
     });
   },
 
   sell(room_code: string, player_code: string, coin: string, qty: number) {
-    return request<TradeResult>('/api/trade/sell', {
-      method: 'POST',
+    return request<TradeResult>("/api/trade/sell", {
+      method: "POST",
       body: JSON.stringify({ room_code, player_code, coin, qty }),
     });
   },

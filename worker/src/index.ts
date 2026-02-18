@@ -1,291 +1,312 @@
-// Cloudflare Worker — Fortnite Coins Market API
-// Deploy: npx wrangler deploy
-
 interface Env {
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
 }
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-  'Access-Control-Allow-Headers': 'content-type',
-};
+const ALLOWED_METHODS = "GET,POST,OPTIONS";
+const ALLOWED_HEADERS = "content-type,authorization";
 
-function json(data: unknown, status = 200) {
+function resolveOrigin(origin: string | null): string {
+  if (!origin) return "*";
+
+  if (/^http:\/\/localhost(?::\d+)?$/.test(origin)) return origin;
+  if (/^http:\/\/127\.0\.0\.1(?::\d+)?$/.test(origin)) return origin;
+
+  const isHttps = /^https:\/\//.test(origin);
+  if (isHttps) return origin;
+
+  return "*";
+}
+
+function corsHeaders(origin: string | null): Record<string, string> {
+  return {
+    "Access-Control-Allow-Origin": resolveOrigin(origin),
+    "Access-Control-Allow-Methods": ALLOWED_METHODS,
+    "Access-Control-Allow-Headers": ALLOWED_HEADERS,
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin",
+  };
+}
+
+function json(data: unknown, status = 200, origin: string | null = null): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    headers: {
+      ...corsHeaders(origin),
+      "Content-Type": "application/json",
+    },
   });
 }
 
-function err(msg: string, status = 400) {
-  return json({ error: msg }, status);
+function err(message: string, status = 400, origin: string | null = null): Response {
+  return json({ error: message }, status, origin);
 }
 
 async function supabase(env: Env, path: string, options?: RequestInit) {
-  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/${path}`, {
+  const response = await fetch(`${env.SUPABASE_URL}/rest/v1/${path}`, {
     ...options,
     headers: {
       apikey: env.SUPABASE_SERVICE_ROLE_KEY,
       Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=representation',
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
       ...(options?.headers || {}),
     },
   });
-  const text = await res.text();
+
+  const text = await response.text();
   try {
-    return { ok: res.ok, status: res.status, data: JSON.parse(text) };
+    return { ok: response.ok, status: response.status, data: JSON.parse(text) };
   } catch {
-    return { ok: res.ok, status: res.status, data: text };
+    return { ok: response.ok, status: response.status, data: text };
   }
 }
 
 async function rpc(env: Env, fn: string, params: Record<string, unknown>) {
-  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/${fn}`, {
-    method: 'POST',
+  const response = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
     headers: {
       apikey: env.SUPABASE_SERVICE_ROLE_KEY,
       Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(params),
   });
-  const text = await res.text();
+
+  const text = await response.text();
   try {
-    return { ok: res.ok, status: res.status, data: JSON.parse(text) };
+    return { ok: response.ok, status: response.status, data: JSON.parse(text) };
   } catch {
-    return { ok: res.ok, status: res.status, data: text };
+    return { ok: response.ok, status: response.status, data: text };
   }
 }
 
-// ---- Route handlers ----
-
-async function handleHealth() {
-  return json({ status: 'ok', ts: new Date().toISOString() });
+async function handleHealth(origin: string | null) {
+  return json({ status: "ok", ts: new Date().toISOString() }, 200, origin);
 }
 
-async function handleJoin(env: Env, body: any) {
+async function handleJoin(env: Env, body: any, origin: string | null) {
   const { room_code, display_name, pin } = body;
-  if (!room_code || !display_name || !pin) return err('Missing fields');
+  if (!room_code || !display_name || !pin) return err("Missing fields", 400, origin);
 
-  // Ensure room exists
-  await supabase(env, 'rooms', {
-    method: 'POST',
-    headers: { Prefer: 'resolution=ignore-duplicates' } as any,
+  await supabase(env, "rooms", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates" } as any,
     body: JSON.stringify({ room_code, spread_bps: 50 }),
   });
 
-  // Ensure initial prices exist
-  const coins = ['JUANO', 'ZOM', 'CRIS'];
+  const coins = ["JUANO", "ZOM", "CRIS"];
   const defaultPrices: Record<string, number> = { JUANO: 50000, ZOM: 60000, CRIS: 55000 };
-  for (const c of coins) {
-    const existing = await supabase(env, `prices?room_code=eq.${room_code}&coin_symbol=eq.${c}&limit=1`);
+
+  for (const symbol of coins) {
+    const existing = await supabase(env, `prices?room_code=eq.${room_code}&coin_symbol=eq.${symbol}&limit=1`);
     if (existing.ok && Array.isArray(existing.data) && existing.data.length === 0) {
-      await supabase(env, 'prices', {
-        method: 'POST',
-        body: JSON.stringify({ room_code, coin_symbol: c, price: defaultPrices[c] }),
+      await supabase(env, "prices", {
+        method: "POST",
+        body: JSON.stringify({ room_code, coin_symbol: symbol, price: defaultPrices[symbol] }),
       });
     }
   }
 
-  // Check if player exists
   const existingPlayer = await supabase(
     env,
     `room_players?room_code=eq.${room_code}&display_name=eq.${encodeURIComponent(display_name)}&limit=1`
   );
 
   if (existingPlayer.ok && Array.isArray(existingPlayer.data) && existingPlayer.data.length > 0) {
-    const p = existingPlayer.data[0];
-    if (p.pin !== pin) return err('Invalid PIN', 403);
+    const player = existingPlayer.data[0];
+    if (player.pin !== pin) return err("Invalid PIN", 403, origin);
 
     const room = await supabase(env, `rooms?room_code=eq.${room_code}&limit=1`);
     const spread_bps = room.ok && Array.isArray(room.data) ? room.data[0]?.spread_bps || 50 : 50;
 
-    return json({
-      ok: true,
-      room_code,
-      player_code: p.player_code,
-      display_name: p.display_name,
-      cash: Number(p.cash),
-      spread_bps,
-    });
+    return json(
+      {
+        ok: true,
+        room_code,
+        player_code: player.player_code,
+        display_name: player.display_name,
+        cash: Number(player.cash),
+        spread_bps,
+      },
+      200,
+      origin
+    );
   }
 
-  // Create new player
   const player_code = `${room_code}-${Date.now().toString(36).toUpperCase()}`;
-  const createRes = await supabase(env, 'room_players', {
-    method: 'POST',
+  const createRes = await supabase(env, "room_players", {
+    method: "POST",
     body: JSON.stringify({ room_code, player_code, display_name, pin, cash: 100000 }),
   });
 
-  if (!createRes.ok) return err('Failed to create player');
-  const newPlayer = Array.isArray(createRes.data) ? createRes.data[0] : createRes.data;
+  if (!createRes.ok) {
+    return err("Failed to create player", 500, origin);
+  }
 
-  // Create holding rows
-  for (const c of coins) {
-    await supabase(env, 'holdings', {
-      method: 'POST',
-      headers: { Prefer: 'resolution=ignore-duplicates' } as any,
-      body: JSON.stringify({ room_code, player_id: newPlayer.id, coin_symbol: c, qty: 0 }),
+  const newPlayer = Array.isArray(createRes.data) ? createRes.data[0] : createRes.data;
+  for (const symbol of coins) {
+    await supabase(env, "holdings", {
+      method: "POST",
+      headers: { Prefer: "resolution=ignore-duplicates" } as any,
+      body: JSON.stringify({ room_code, player_id: newPlayer.id, coin_symbol: symbol, qty: 0 }),
     });
   }
 
   const room = await supabase(env, `rooms?room_code=eq.${room_code}&limit=1`);
   const spread_bps = room.ok && Array.isArray(room.data) ? room.data[0]?.spread_bps || 50 : 50;
 
-  return json({
-    ok: true,
-    room_code,
-    player_code,
-    display_name,
-    cash: 100000,
-    spread_bps,
-  });
+  return json(
+    {
+      ok: true,
+      room_code,
+      player_code,
+      display_name,
+      cash: 100000,
+      spread_bps,
+    },
+    200,
+    origin
+  );
 }
 
-async function handleState(env: Env, url: URL) {
-  const room_code = url.searchParams.get('room_code');
-  const player_code = url.searchParams.get('player_code');
-  if (!room_code || !player_code) return err('Missing params');
+async function handleState(env: Env, url: URL, origin: string | null) {
+  const room_code = url.searchParams.get("room_code");
+  const player_code = url.searchParams.get("player_code");
+  if (!room_code || !player_code) return err("Missing params", 400, origin);
 
   const playerRes = await supabase(
     env,
     `room_players?room_code=eq.${room_code}&player_code=eq.${player_code}&limit=1`
   );
-  if (!playerRes.ok || !Array.isArray(playerRes.data) || !playerRes.data.length) return err('Player not found');
-  const player = playerRes.data[0];
 
+  if (!playerRes.ok || !Array.isArray(playerRes.data) || playerRes.data.length === 0) {
+    return err("Player not found", 404, origin);
+  }
+
+  const player = playerRes.data[0];
   const holdingsRes = await supabase(
     env,
     `holdings?room_code=eq.${room_code}&player_id=eq.${player.id}&select=coin_symbol,qty`
   );
-  const holdings = holdingsRes.ok && Array.isArray(holdingsRes.data) ? holdingsRes.data : [];
-
   const roomRes = await supabase(env, `rooms?room_code=eq.${room_code}&limit=1`);
-  const spread_bps = roomRes.ok && Array.isArray(roomRes.data) ? roomRes.data[0]?.spread_bps || 50 : 50;
+  const coinsRes = await supabase(env, "coins?select=coin_symbol,player_label");
 
-  const coinsRes = await supabase(env, 'coins?select=coin_symbol,player_label');
+  const holdings = holdingsRes.ok && Array.isArray(holdingsRes.data) ? holdingsRes.data : [];
+  const spread_bps = roomRes.ok && Array.isArray(roomRes.data) ? roomRes.data[0]?.spread_bps || 50 : 50;
   const coins = coinsRes.ok && Array.isArray(coinsRes.data) ? coinsRes.data : [];
 
-  return json({
-    cash: Number(player.cash),
-    holdings: holdings.map((h: any) => ({ coin_symbol: h.coin_symbol, qty: Number(h.qty) })),
-    spread_bps,
-    coins,
-  });
+  return json(
+    {
+      cash: Number(player.cash),
+      holdings: holdings.map((h: any) => ({ coin_symbol: h.coin_symbol, qty: Number(h.qty) })),
+      spread_bps,
+      coins,
+    },
+    200,
+    origin
+  );
 }
 
-async function handleMarket(env: Env, url: URL) {
-  const room_code = url.searchParams.get('room_code');
-  if (!room_code) return err('Missing room_code');
+async function handleMarket(env: Env, url: URL, origin: string | null) {
+  const room_code = url.searchParams.get("room_code");
+  if (!room_code) return err("Missing room_code", 400, origin);
 
-  const coinsRes = await supabase(env, 'coins?select=coin_symbol,player_label');
-  if (!coinsRes.ok || !Array.isArray(coinsRes.data)) return err('Failed to load coins');
+  const coinsRes = await supabase(env, "coins?select=coin_symbol,player_label");
+  if (!coinsRes.ok || !Array.isArray(coinsRes.data)) return err("Failed to load coins", 500, origin);
 
   const now = Date.now();
   const h24Ago = now - 24 * 60 * 60 * 1000;
 
-  const result = [];
+  const market = [];
   for (const coin of coinsRes.data) {
-    const sym = coin.coin_symbol;
-
-    // All prices for this room+coin, ordered desc
+    const symbol = coin.coin_symbol;
     const pricesRes = await supabase(
       env,
-      `prices?room_code=eq.${room_code}&coin_symbol=eq.${sym}&order=created_at.desc&limit=200`
+      `prices?room_code=eq.${room_code}&coin_symbol=eq.${symbol}&order=created_at.desc&limit=200`
     );
-    const rows = pricesRes.ok && Array.isArray(pricesRes.data) ? pricesRes.data : [];
 
+    const rows = pricesRes.ok && Array.isArray(pricesRes.data) ? pricesRes.data : [];
     const latestPrice = rows.length ? Number(rows[0].price) : 0;
     const recent = rows.filter((r: any) => new Date(r.created_at).getTime() >= h24Ago);
     const prices24 = recent.map((r: any) => Number(r.price));
-
     const open24 = recent.length ? Number(recent[recent.length - 1].price) : latestPrice;
     const high24 = prices24.length ? Math.max(...prices24) : latestPrice;
     const low24 = prices24.length ? Math.min(...prices24) : latestPrice;
     const change24_pct = open24 ? ((latestPrice - open24) / open24) * 100 : 0;
 
-    // Series: last 60 points
-    const series = rows
-      .slice(0, 60)
-      .reverse()
-      .map((r: any) => ({ t: new Date(r.created_at).getTime(), price: Number(r.price) }));
-
-    result.push({
-      coin_symbol: sym,
+    market.push({
+      coin_symbol: symbol,
       player_label: coin.player_label,
       price: latestPrice,
       open24,
       high24,
       low24,
       change24_pct: Math.round(change24_pct * 100) / 100,
-      series,
+      series: rows
+        .slice(0, 60)
+        .reverse()
+        .map((r: any) => ({ t: new Date(r.created_at).getTime(), price: Number(r.price) })),
     });
   }
 
-  return json({ coins: result });
+  return json({ coins: market }, 200, origin);
 }
 
-async function handleTrade(env: Env, body: any, side: 'buy' | 'sell') {
+async function handleTrade(env: Env, body: any, side: "buy" | "sell", origin: string | null) {
   const { room_code, player_code, coin, qty } = body;
-  if (!room_code || !player_code || !coin || !qty) return err('Missing fields');
-  if (qty <= 0) return err('Quantity must be positive');
+  if (!room_code || !player_code || !coin || qty === undefined) return err("Missing fields", 400, origin);
 
-  const result = await rpc(env, 'rpc_trade', {
+  const quantity = Number(qty);
+  if (!Number.isFinite(quantity) || quantity <= 0) return err("Quantity must be positive", 400, origin);
+
+  const result = await rpc(env, "rpc_trade", {
     p_room_code: room_code,
     p_player_code: player_code,
     p_side: side,
     p_coin_symbol: coin,
-    p_qty: qty,
+    p_qty: quantity,
   });
 
   if (!result.ok) {
-    const msg = typeof result.data === 'object' && result.data?.message
-      ? result.data.message
-      : typeof result.data === 'string' ? result.data : 'Trade failed';
-    return err(msg, 400);
+    const message =
+      (typeof result.data === "object" && (result.data as any)?.message) ||
+      (typeof result.data === "string" ? result.data : "Trade failed");
+
+    return err(message, 400, origin);
   }
 
-  return json(result.data);
+  return json(result.data, 200, origin);
 }
-
-// ---- Main handler ----
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (request.method === 'OPTIONS') {
-      return new Response('ok', { headers: corsHeaders });
+    const origin = request.headers.get("Origin");
+
+    if (request.method === "OPTIONS") {
+      return new Response("ok", { headers: corsHeaders(origin) });
     }
 
     const url = new URL(request.url);
     const path = url.pathname;
 
     try {
-      if (path === '/health') return handleHealth();
-
-      if (path === '/api/room/join' && request.method === 'POST') {
-        const body = await request.json();
-        return handleJoin(env, body);
+      if (path === "/health" && request.method === "GET") return handleHealth(origin);
+      if (path === "/api/room/join" && request.method === "POST") {
+        return handleJoin(env, await request.json(), origin);
+      }
+      if (path === "/api/room/state" && request.method === "GET") return handleState(env, url, origin);
+      if (path === "/api/market" && request.method === "GET") return handleMarket(env, url, origin);
+      if (path === "/api/trade/buy" && request.method === "POST") {
+        return handleTrade(env, await request.json(), "buy", origin);
+      }
+      if (path === "/api/trade/sell" && request.method === "POST") {
+        return handleTrade(env, await request.json(), "sell", origin);
       }
 
-      if (path === '/api/room/state') return handleState(env, url);
-      if (path === '/api/market') return handleMarket(env, url);
-
-      if (path === '/api/trade/buy' && request.method === 'POST') {
-        const body = await request.json();
-        return handleTrade(env, body, 'buy');
-      }
-
-      if (path === '/api/trade/sell' && request.method === 'POST') {
-        const body = await request.json();
-        return handleTrade(env, body, 'sell');
-      }
-
-      return err('Not found', 404);
-    } catch (e: any) {
-      return err(e.message || 'Internal error', 500);
+      return err("Not found", 404, origin);
+    } catch (error: any) {
+      return err(error?.message || "Internal error", 500, origin);
     }
   },
 };
