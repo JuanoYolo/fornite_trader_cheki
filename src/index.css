@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+@layer base {
+  :root {
+    --background: 228 20% 6%;
+    --foreground: 210 20% 92%;
+
+    --card: 228 18% 10%;
+    --card-foreground: 210 20% 92%;
+
+    --popover: 228 18% 10%;
+    --popover-foreground: 210 20% 92%;
+
+    --primary: 145 72% 46%;
+    --primary-foreground: 228 20% 6%;
+
+    --secondary: 228 15% 16%;
+    --secondary-foreground: 210 20% 85%;
+
+    --muted: 228 14% 14%;
+    --muted-foreground: 215 15% 52%;
+
+    --accent: 217 80% 56%;
+    --accent-foreground: 210 20% 98%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 210 20% 98%;
+
+    --border: 228 14% 18%;
+    --input: 228 14% 18%;
+    --ring: 145 72% 46%;
+
+    --radius: 0.75rem;
+
+    --gain: 145 72% 46%;
+    --loss: 0 72% 55%;
+    --warning: 38 92% 50%;
+
+    --glow-primary: 0 0 20px hsl(145 72% 46% / 0.15);
+    --glow-accent: 0 0 20px hsl(217 80% 56% / 0.15);
+    --glow-loss: 0 0 20px hsl(0 72% 55% / 0.15);
+
+    --sidebar-background: 228 18% 10%;
+    --sidebar-foreground: 210 20% 92%;
+    --sidebar-primary: 145 72% 46%;
+    --sidebar-primary-foreground: 228 20% 6%;
+    --sidebar-accent: 228 15% 16%;
+    --sidebar-accent-foreground: 210 20% 85%;
+    --sidebar-border: 228 14% 18%;
+    --sidebar-ring: 145 72% 46%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-family: 'Space Grotesk', sans-serif;
+  }
+
+  .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+@layer components {
+  .card-glow {
+    box-shadow: var(--glow-primary);
+    transition: box-shadow 0.3s ease;
+  }
+  .card-glow:hover {
+    box-shadow: 0 0 30px hsl(145 72% 46% / 0.25);
+  }
+  .card-glow-loss {
+    box-shadow: var(--glow-loss);
+  }
+  .card-glow-loss:hover {
+    box-shadow: 0 0 30px hsl(0 72% 55% / 0.25);
+  }
+  .text-gain {
+    color: hsl(var(--gain));
+  }
+  .text-loss {
+    color: hsl(var(--loss));
+  }
+  .bg-gain {
+    background-color: hsl(var(--gain));
+  }
+  .bg-loss {
+    background-color: hsl(var(--loss));
+  }
+  .bg-gain\/10 {
+    background-color: hsl(var(--gain) / 0.1);
+  }
+  .bg-loss\/10 {
+    background-color: hsl(var(--loss) / 0.1);
+  }
+  .trading-input {
+    @apply bg-secondary border-border text-foreground placeholder:text-muted-foreground focus:ring-1 focus:ring-ring;
+  }
+}
