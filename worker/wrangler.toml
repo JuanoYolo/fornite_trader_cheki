@@ -8,3 +8,5 @@ compatibility_date = "2024-01-01"
 # Secrets are set via:
 # npx wrangler secret put SUPABASE_URL
 # npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+
+# npx wrangler secret put FORTNITE_API_KEY

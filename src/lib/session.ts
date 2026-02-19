@@ -1,10 +1,13 @@
+import type { MarketType } from "@/lib/marketType";
+
 interface Session {
   room_code: string;
   player_code: string;
   display_name: string;
+  player_codes?: Partial<Record<MarketType, string>>;
 }
 
-const KEY = 'fn_market_session';
+const KEY = "fn_market_session";
 
 export function getSession(): Session | null {
   try {
@@ -13,6 +16,10 @@ export function getSession(): Session | null {
   } catch {
     return null;
   }
+}
+
+export function getPlayerCodeForMarket(session: Session, marketType: MarketType): string {
+  return session.player_codes?.[marketType] || session.player_code;
 }
 
 export function setSession(s: Session) {
