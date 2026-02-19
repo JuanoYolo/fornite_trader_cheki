@@ -280,6 +280,16 @@ async function ensurePlayerForMarket(
   marketType: MarketType,
   playerIdentity: string
 ): Promise<Record<string, unknown>> {
+  const describeFailure = (result: { status: number; data: unknown }) => {
+    if (typeof result.data === "string") return result.data;
+    if (result.data && typeof result.data === "object") {
+      const payload = result.data as Record<string, unknown>;
+      const detail = payload.message ?? payload.error ?? payload.details ?? payload.hint;
+      if (detail) return String(detail);
+    }
+    return `Supabase error ${result.status}`;
+  };
+
   const existing = await supabase(
     env,
     `room_players?room_code=eq.${roomCode}&display_name=eq.${encodeURIComponent(displayName)}&market_type=eq.${marketType}&limit=1`
@@ -292,8 +302,9 @@ async function ensurePlayerForMarket(
   }
 
   const playerCode = `${playerIdentity}-${marketType}`;
-  const created = await supabase(env, "room_players", {
+  const created = await supabase(env, "room_players?on_conflict=room_code,display_name,market_type", {
     method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify({
       room_code: roomCode,
       player_identity: playerIdentity,
@@ -306,10 +317,20 @@ async function ensurePlayerForMarket(
   });
 
   if (!created.ok || !Array.isArray(created.data) || !created.data.length) {
-    const detail = formatSupabaseError(created.data);
-    throw new Error(`Failed to create player: ${detail}`);
+  const fallback = await supabase(
+    env,
+    `room_players?room_code=eq.${roomCode}&player_code=eq.${encodeURIComponent(playerCode)}&market_type=eq.${marketType}&limit=1`
+  );
+
+  if (fallback.ok && Array.isArray(fallback.data) && fallback.data.length) {
+    return fallback.data[0] as Record<string, unknown>;
   }
 
+  const reason = created.ok
+    ? "Create player returned no rows"
+    : describeFailure({ status: created.status, data: created.data });
+  throw new Error(`Failed to create player: ${reason}`);
+}
   const player = created.data[0] as Record<string, unknown>;
   for (const symbol of Object.keys(COIN_PROFILES)) {
     await supabase(env, "holdings", {
