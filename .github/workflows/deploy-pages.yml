@@ -26,10 +26,13 @@ jobs:
         with:
           node-version: 20
 
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
       # Este repo no tiene package-lock.json en la raíz.
       # npm ci y cache:npm exigen lockfile y rompen el workflow en GitHub-hosted runners.
       - name: Install dependencies (no lockfile)
-        run: npm install
+        run: npm install --no-audit --no-fund
 
       - name: Build
         run: npm run build
