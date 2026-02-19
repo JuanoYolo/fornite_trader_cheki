@@ -302,6 +302,66 @@ async function ensurePlayerForMarket(
   }
 
   const playerCode = `${playerIdentity}-${marketType}`;
+  const insertPayload = {
+    room_code: roomCode,
+    player_identity: playerIdentity,
+    market_type: marketType,
+    player_code: playerCode,
+    display_name: displayName,
+    pin,
+    cash: 100000,
+  };
+
+  // Primary path for current schema (UNIQUE room_code+display_name+market_type).
+  const created = await supabase(env, "room_players?on_conflict=room_code,display_name,market_type", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify(insertPayload),
+  });
+
+  let player: Record<string, unknown> | null = null;
+  if (created.ok && Array.isArray(created.data) && created.data.length) {
+    player = created.data[0] as Record<string, unknown>;
+  } else {
+    // Legacy compatibility: if on_conflict fails because DB constraints differ, retry plain insert.
+    const legacyCreate = await supabase(env, "room_players", {
+      method: "POST",
+      body: JSON.stringify(insertPayload),
+    });
+
+    if (legacyCreate.ok && Array.isArray(legacyCreate.data) && legacyCreate.data.length) {
+      player = legacyCreate.data[0] as Record<string, unknown>;
+    } else {
+      const fallbackByCode = await supabase(
+        env,
+        `room_players?room_code=eq.${roomCode}&player_code=eq.${encodeURIComponent(playerCode)}&market_type=eq.${marketType}&limit=1`
+      );
+      if (fallbackByCode.ok && Array.isArray(fallbackByCode.data) && fallbackByCode.data.length) {
+        player = fallbackByCode.data[0] as Record<string, unknown>;
+      }
+
+      if (!player) {
+        const fallbackByName = await supabase(
+          env,
+          `room_players?room_code=eq.${roomCode}&display_name=eq.${encodeURIComponent(displayName)}&market_type=eq.${marketType}&limit=1`
+        );
+        if (fallbackByName.ok && Array.isArray(fallbackByName.data) && fallbackByName.data.length) {
+          const found = fallbackByName.data[0] as Record<string, unknown>;
+          if (String(found.pin) !== pin) throw new Error("Invalid PIN");
+          player = found;
+        }
+      }
+
+      if (!player) {
+        const reasons = [
+          `upsert=${created.ok ? "ok-no-rows" : describeFailure({ status: created.status, data: created.data })}`,
+          `insert=${legacyCreate.ok ? "ok-no-rows" : describeFailure({ status: legacyCreate.status, data: legacyCreate.data })}`,
+        ];
+        throw new Error(`Failed to create player: ${reasons.join("; ")}`);
+      }
+    }
+  }
+
   const created = await supabase(env, "room_players?on_conflict=room_code,display_name,market_type", {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates,return=representation" },
