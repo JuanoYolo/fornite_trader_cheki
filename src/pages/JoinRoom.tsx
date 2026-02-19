@@ -35,6 +35,7 @@ export default function JoinRoom() {
         room_code: res.room_code,
         player_code: res.player_code,
         display_name: res.display_name,
+        player_codes: res.player_codes,
       });
       toast.success(`Welcome, ${res.display_name}!`);
       navigate('/');

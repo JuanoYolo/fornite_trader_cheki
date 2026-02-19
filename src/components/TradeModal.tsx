@@ -1,11 +1,12 @@
-import { useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { api } from '@/lib/api';
-import { getSession } from '@/lib/session';
-import { formatPrice } from '@/lib/format';
-import { toast } from 'sonner';
+import { useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { api } from "@/lib/api";
+import { getMarketType, type MarketType } from "@/lib/marketType";
+import { getPlayerCodeForMarket, getSession } from "@/lib/session";
+import { formatPrice } from "@/lib/format";
+import { toast } from "sonner";
 
 interface Props {
   open: boolean;
@@ -16,6 +17,7 @@ interface Props {
   holdingQty: number;
   cash: number;
   spreadBps: number;
+  marketType: MarketType;
   onTradeComplete: () => void;
 }
 
@@ -28,14 +30,15 @@ export default function TradeModal({
   holdingQty,
   cash,
   spreadBps,
+  marketType,
   onTradeComplete,
 }: Props) {
-  const [side, setSide] = useState<'buy' | 'sell'>('buy');
-  const [qty, setQty] = useState('');
+  const [side, setSide] = useState<"buy" | "sell">("buy");
+  const [qty, setQty] = useState("");
   const [loading, setLoading] = useState(false);
 
   const spread = spreadBps / 10000;
-  const execPrice = side === 'buy' ? currentPrice * (1 + spread) : currentPrice * (1 - spread);
+  const execPrice = side === "buy" ? currentPrice * (1 + spread) : currentPrice * (1 - spread);
   const total = execPrice * (parseFloat(qty) || 0);
 
   const maxBuy = Math.floor(cash / (currentPrice * (1 + spread)));
@@ -49,16 +52,17 @@ export default function TradeModal({
 
     setLoading(true);
     try {
-      const fn = side === 'buy' ? api.buy : api.sell;
-      const result = await fn(session.room_code, session.player_code, coinSymbol, q);
-      toast.success(
-        `${side === 'buy' ? 'Bought' : 'Sold'} ${q} ${coinSymbol} @ $${formatPrice(result.exec_price)}`
-      );
-      setQty('');
+      const selectedMarket = marketType || getMarketType();
+      const playerCode = getPlayerCodeForMarket(session, selectedMarket);
+      const fn = side === "buy" ? api.buy : api.sell;
+      const result = await fn(session.room_code, playerCode, coinSymbol, q, selectedMarket);
+      toast.success(`${side === "buy" ? "Bought" : "Sold"} ${q} ${coinSymbol} @ $${formatPrice(result.exec_price)} [${selectedMarket}]`);
+      setQty("");
       onTradeComplete();
       onClose();
-    } catch (e: any) {
-      toast.error(e.message || 'Trade failed');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Trade failed";
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -69,22 +73,22 @@ export default function TradeModal({
       <DialogContent className="bg-card border-border max-w-sm">
         <DialogHeader>
           <DialogTitle className="text-foreground">
-            Trade {coinSymbol} <span className="text-muted-foreground text-sm">({playerLabel})</span>
+            Trade {coinSymbol} <span className="text-muted-foreground text-sm">({playerLabel} · {marketType})</span>
           </DialogTitle>
         </DialogHeader>
 
         <div className="flex gap-2 mb-4">
           <Button
-            variant={side === 'buy' ? 'default' : 'outline'}
-            className={side === 'buy' ? 'flex-1 bg-gain text-primary-foreground hover:bg-gain/90' : 'flex-1'}
-            onClick={() => setSide('buy')}
+            variant={side === "buy" ? "default" : "outline"}
+            className={side === "buy" ? "flex-1 bg-gain text-primary-foreground hover:bg-gain/90" : "flex-1"}
+            onClick={() => setSide("buy")}
           >
             Buy
           </Button>
           <Button
-            variant={side === 'sell' ? 'default' : 'outline'}
-            className={side === 'sell' ? 'flex-1 bg-loss text-destructive-foreground hover:bg-loss/90' : 'flex-1'}
-            onClick={() => setSide('sell')}
+            variant={side === "sell" ? "default" : "outline"}
+            className={side === "sell" ? "flex-1 bg-loss text-destructive-foreground hover:bg-loss/90" : "flex-1"}
+            onClick={() => setSide("sell")}
           >
             Sell
           </Button>
@@ -100,12 +104,8 @@ export default function TradeModal({
             <span className="font-mono text-foreground">${formatPrice(execPrice)}</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">
-              {side === 'buy' ? 'Cash Available' : 'Holdings'}
-            </span>
-            <span className="font-mono text-foreground">
-              {side === 'buy' ? `$${formatPrice(cash)}` : `${holdingQty}`}
-            </span>
+            <span className="text-muted-foreground">{side === "buy" ? "Cash Available" : "Holdings"}</span>
+            <span className="font-mono text-foreground">{side === "buy" ? `$${formatPrice(cash)}` : `${holdingQty}`}</span>
           </div>
 
           <div>
@@ -122,7 +122,7 @@ export default function TradeModal({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setQty(String(side === 'buy' ? maxBuy : maxSell))}
+                onClick={() => setQty(String(side === "buy" ? maxBuy : maxSell))}
                 className="text-xs whitespace-nowrap"
               >
                 Max
@@ -133,7 +133,7 @@ export default function TradeModal({
           {parseFloat(qty) > 0 && (
             <div className="flex justify-between text-sm border-t border-border pt-2">
               <span className="text-muted-foreground">Total</span>
-              <span className={`font-mono font-bold ${side === 'buy' ? 'text-gain' : 'text-loss'}`}>
+              <span className={`font-mono font-bold ${side === "buy" ? "text-gain" : "text-loss"}`}>
                 ${formatPrice(total)}
               </span>
             </div>
@@ -143,12 +143,12 @@ export default function TradeModal({
             onClick={handleTrade}
             disabled={loading || !parseFloat(qty)}
             className={`w-full font-bold ${
-              side === 'buy'
-                ? 'bg-gain text-primary-foreground hover:bg-gain/90'
-                : 'bg-loss text-destructive-foreground hover:bg-loss/90'
+              side === "buy"
+                ? "bg-gain text-primary-foreground hover:bg-gain/90"
+                : "bg-loss text-destructive-foreground hover:bg-loss/90"
             }`}
           >
-            {loading ? 'Processing...' : `${side === 'buy' ? 'Buy' : 'Sell'} ${coinSymbol}`}
+            {loading ? "Processing..." : `${side === "buy" ? "Buy" : "Sell"} ${coinSymbol}`}
           </Button>
         </div>
       </DialogContent>

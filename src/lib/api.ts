@@ -1,3 +1,5 @@
+import type { MarketType } from "@/lib/marketType";
+
 const rawApiBase = import.meta.env.VITE_API_BASE || "";
 const API_BASE = rawApiBase.replace(/\/+$/, "");
 
@@ -23,15 +25,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
         ...(options?.headers || {}),
       },
     });
-  } catch (error) {
-    throw new ApiError(
-      `No se pudo conectar con la API (${target}). Revisa VITE_API_BASE y el Worker.`,
-      0
-    );
+  } catch {
+    throw new ApiError(`No se pudo conectar con la API (${target}). Revisa VITE_API_BASE y el Worker.`, 0);
   }
 
   const payload = await response.text();
-  let data: any = null;
+  let data: unknown = null;
   if (payload) {
     try {
       data = JSON.parse(payload);
@@ -41,7 +40,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
-    const message = data?.error || data?.message || response.statusText || "API request failed";
+    const maybeObj = (data && typeof data === "object") ? (data as Record<string, unknown>) : undefined;
+    const message = String(maybeObj?.error || maybeObj?.message || response.statusText || "API request failed");
     throw new ApiError(message, response.status);
   }
 
@@ -55,6 +55,7 @@ export interface JoinResponse {
   display_name: string;
   cash: number;
   spread_bps: number;
+  player_codes: Record<MarketType, string>;
 }
 
 export interface CoinMarket {
@@ -66,9 +67,15 @@ export interface CoinMarket {
   low24: number;
   change24_pct: number;
   series: { t: number; price: number }[];
+  market_type: MarketType;
+  trading_price_component: number;
+  fundamental_component: number;
+  fundamental_score: number;
+  fundamental_status: "live" | "cached" | "fallback";
 }
 
 export interface MarketResponse {
+  market_type: MarketType;
   coins: CoinMarket[];
 }
 
@@ -78,6 +85,7 @@ export interface Holding {
 }
 
 export interface RoomState {
+  market_type: MarketType;
   cash: number;
   holdings: Holding[];
   spread_bps: number;
@@ -85,6 +93,7 @@ export interface RoomState {
 }
 
 export interface TradeResult {
+  market_type: MarketType;
   exec_price: number;
   new_mid: number;
   cash: number;
@@ -99,27 +108,29 @@ export const api = {
     });
   },
 
-  market(room_code: string) {
-    return request<MarketResponse>(`/api/market?room_code=${encodeURIComponent(room_code)}`);
-  },
-
-  state(room_code: string, player_code: string) {
-    return request<RoomState>(
-      `/api/room/state?room_code=${encodeURIComponent(room_code)}&player_code=${encodeURIComponent(player_code)}`
+  market(room_code: string, marketType: MarketType) {
+    return request<MarketResponse>(
+      `/api/market?room_code=${encodeURIComponent(room_code)}&market_type=${encodeURIComponent(marketType)}`
     );
   },
 
-  buy(room_code: string, player_code: string, coin: string, qty: number) {
+  state(room_code: string, player_code: string, marketType: MarketType) {
+    return request<RoomState>(
+      `/api/room/state?room_code=${encodeURIComponent(room_code)}&player_code=${encodeURIComponent(player_code)}&market_type=${encodeURIComponent(marketType)}`
+    );
+  },
+
+  buy(room_code: string, player_code: string, coin: string, qty: number, marketType: MarketType) {
     return request<TradeResult>("/api/trade/buy", {
       method: "POST",
-      body: JSON.stringify({ room_code, player_code, coin, qty }),
+      body: JSON.stringify({ room_code, player_code, coin, qty, market_type: marketType }),
     });
   },
 
-  sell(room_code: string, player_code: string, coin: string, qty: number) {
+  sell(room_code: string, player_code: string, coin: string, qty: number, marketType: MarketType) {
     return request<TradeResult>("/api/trade/sell", {
       method: "POST",
-      body: JSON.stringify({ room_code, player_code, coin, qty }),
+      body: JSON.stringify({ room_code, player_code, coin, qty, market_type: marketType }),
     });
   },
 };
