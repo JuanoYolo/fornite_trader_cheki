@@ -1,73 +1,108 @@
-# Welcome to your Lovable project
+# Fortnite Coins Market (MVP + Fundamentals)
 
-## Project info
+MVP full-stack:
+- Frontend: Vite + React + TypeScript + shadcn-ui + Tailwind (GitHub Pages SPA)
+- Backend: Cloudflare Worker (REST)
+- DB: Supabase Postgres (`supabase/schema.sql`)
+- Fundamentals: Fortnite-API (server-side only, key never exposed in frontend)
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Mercados
 
-## How can I edit this code?
+Hay 2 libros paralelos (`market_type`):
+- `season` (default): fundamentales de temporada actual
+- `historical`: fundamentales all-time/lifetime
 
-There are several ways of editing your application.
+Cada market_type tiene cash/holdings/trades/prices separados.
 
-**Use Lovable**
+## Endpoints Worker
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+- `GET /health`
+- `POST /api/room/join`
+- `GET /api/room/state?room_code=...&player_code=...&market_type=season|historical`
+- `GET /api/market?room_code=...&market_type=season|historical`
+- `POST /api/trade/buy`
+- `POST /api/trade/sell`
+- `GET /api/fortnite/stats?player=<name>&platform=<pc|xbl>&scope=<season|historical>` (debug)
 
-Changes made via Lovable will be committed automatically to this repo.
+## Fortnite-API usage (exacto)
 
-**Use your preferred IDE**
+Worker consulta:
+- `GET https://fortnite-api.com/v2/stats/br/v2?name=<player>&accountType=epic&timeWindow=<season|lifetime>`
+- Header: `Authorization: <FORTNITE_API_KEY>`
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+Mapeo (normalizado):
+- `wins`, `kd`, `winRate`, `matches`, `kills`
+- score fundamental: `0.5*kdNorm + 0.3*winRateNorm + 0.2*winsNorm`
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+## Variables y secretos
 
-Follow these steps:
+### Frontend
+- `VITE_API_BASE=https://<tu-worker>.workers.dev`
+- `VITE_BASE=/<repo-name>/`
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+### Worker secrets (Wrangler)
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `FORTNITE_API_KEY`
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```bash
+cd worker
+npm ci
+npx wrangler secret put SUPABASE_URL
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+npx wrangler secret put FORTNITE_API_KEY
+npx wrangler deploy
 ```
 
-**Edit a file directly in GitHub**
+## Deploy GitHub Pages
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+Workflow: `.github/workflows/deploy-pages.yml`
+- build con:
+  - `VITE_API_BASE: ${{ vars.VITE_API_BASE }}`
+  - `VITE_BASE: /${{ github.event.repository.name }}/`
+- publica `dist/` con `actions/upload-pages-artifact@v3` + `actions/deploy-pages@v4`
 
-**Use GitHub Codespaces**
+## Smoke tests
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+```bash
+curl -i <WORKER_URL>/health
+```
 
-## What technologies are used for this project?
+```bash
+curl -i "<WORKER_URL>/api/fortnite/stats?player=JuanoYoloXd&platform=pc&scope=season"
+```
 
-This project is built with:
+```bash
+curl -i "<WORKER_URL>/api/market?room_code=JUANO-ROOM&market_type=season"
+```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+```bash
+curl -i "<WORKER_URL>/api/market?room_code=JUANO-ROOM&market_type=historical"
+```
 
-## How can I deploy this project?
+```bash
+curl -i -X POST <WORKER_URL>/api/room/join \
+  -H "Content-Type: application/json" \
+  -d '{"room_code":"JUANO-ROOM","display_name":"DemoUser","pin":"1234"}'
+```
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+```bash
+curl -i "<WORKER_URL>/api/room/state?room_code=JUANO-ROOM&player_code=<PLAYER_CODE_SEASON>&market_type=season"
+```
 
-## Can I connect a custom domain to my Lovable project?
+```bash
+curl -i -X POST <WORKER_URL>/api/trade/buy \
+  -H "Content-Type: application/json" \
+  -d '{"room_code":"JUANO-ROOM","player_code":"<PLAYER_CODE_SEASON>","coin":"JUANO","qty":1,"market_type":"season"}'
+```
 
-Yes, you can!
+```bash
+curl -i -X POST <WORKER_URL>/api/trade/buy \
+  -H "Content-Type: application/json" \
+  -d '{"room_code":"JUANO-ROOM","player_code":"<PLAYER_CODE_HIST>","coin":"JUANO","qty":1,"market_type":"historical"}'
+```
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+## Notas MVP
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+- Si Fortnite-API falla o rate-limita, `/api/market` hace fallback a trading-only (`fundamental_status: "fallback"`) y la app sigue operativa.
+- TTL cache stats: 10 minutos en `fortnite_stats_cache`.
