@@ -68,6 +68,38 @@ Workflow: `.github/workflows/deploy-pages.yml`
 curl -i <WORKER_URL>/health
 ```
 
+
+## Troubleshooting Worker deploy (merge conflicts)
+
+Si `npx wrangler deploy` falla con errores como:
+- `The symbol "created" has already been declared`
+- `The symbol "player" has already been declared`
+
+entonces `worker/src/index.ts` quedó con bloques duplicados por conflicto de merge en `ensurePlayerForMarket`.
+
+### Qué hacer
+1. Abre `worker/src/index.ts`.
+2. Reemplaza **todo** el bloque desde `async function ensurePlayerForMarket(`
+   hasta justo antes de `async function resolvePlayerCodeForMarket(`
+   por la versión limpia de la rama actual.
+3. Verifica que solo exista **una** declaración de cada símbolo:
+
+```bash
+cd worker
+rg -n "const created|let player|const player = created\.data\[0\]" src/index.ts
+```
+
+Resultado esperado:
+- 1 match para `const created`
+- 1 match para `let player`
+- 0 matches para `const player = created.data[0]`
+
+4. Vuelve a desplegar:
+
+```bash
+npx wrangler deploy --name fortnite-coins-market-api
+```
+
 ```bash
 curl -i "<WORKER_URL>/api/fortnite/stats?player=JuanoYoloXd&platform=pc&scope=season"
 ```
