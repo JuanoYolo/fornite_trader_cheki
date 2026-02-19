@@ -1,73 +1,119 @@
-# Welcome to your Lovable project
+# Fortnite Coins Market (MVP)
 
-## Project info
+MVP full-stack listo para correr con:
+- **Frontend:** Vite + React + TypeScript + shadcn-ui + Tailwind (GitHub Pages SPA)
+- **Backend:** Cloudflare Worker (TypeScript, REST API)
+- **DB:** Supabase Postgres (`supabase/schema.sql` + seed + RPC transaccional `rpc_trade`)
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Arquitectura
 
-## How can I edit this code?
+- Frontend llama al Worker con `VITE_API_BASE` (sin secretos en cliente).
+- Worker usa `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` como secretos de Wrangler.
+- DB centraliza estado de room/players/holdings/trades/prices.
+- Trading usa spread de **0.5%** (50 bps).
 
-There are several ways of editing your application.
+## Endpoints del Worker
 
-**Use Lovable**
+- `GET /health`
+- `POST /api/room/join`
+- `GET /api/room/state?room_code=...&player_code=...`
+- `GET /api/market?room_code=...`
+- `POST /api/trade/buy`
+- `POST /api/trade/sell`
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+CORS habilitado para `https://*`, `http://localhost:*` y `http://127.0.0.1:*`.
 
-Changes made via Lovable will be committed automatically to this repo.
+## Variables de entorno
 
-**Use your preferred IDE**
+### Frontend
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+- `VITE_API_BASE=https://<tu-worker>.workers.dev`
+- `VITE_BASE=/<repo-name>/` (en local normalmente `/`)
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### Worker (secrets)
 
-Follow these steps:
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+## Setup local (Windows PowerShell)
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+```powershell
+# 1) Instalar dependencias del frontend
+npm ci
 
-# Step 3: Install the necessary dependencies.
-npm i
+# 2) Instalar dependencias del worker
+cd worker
+npm ci
+cd ..
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+# 3) Ejecutar schema + seed en Supabase
+# Copia y pega supabase/schema.sql en SQL Editor y ejecuta.
+
+# 4) Variables frontend para local
+$env:VITE_API_BASE="https://<tu-worker>.workers.dev"
+$env:VITE_BASE="/"
+
+# 5) Correr frontend
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+## Deploy frontend en GitHub Pages
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+Ya está incluido workflow en `.github/workflows/deploy-pages.yml`.
 
-**Use GitHub Codespaces**
+1. En GitHub repo -> **Settings -> Pages**:
+   - Source: **GitHub Actions**.
+2. En GitHub repo -> **Settings -> Secrets and variables -> Actions -> Variables**:
+   - Crear `VITE_API_BASE` con URL del Worker.
+3. Push a `main`.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+Workflow usa:
+- `VITE_API_BASE=${{ vars.VITE_API_BASE }}`
+- `VITE_BASE="/${{ github.event.repository.name }}/"`
 
-## What technologies are used for this project?
+El build genera `dist/404.html` como copia de `index.html` para soportar refresh en SPA en GitHub Pages.
 
-This project is built with:
+## Deploy Worker (Cloudflare)
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+```bash
+cd worker
+npm ci
+npx wrangler login
+npx wrangler secret put SUPABASE_URL
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+npx wrangler deploy
+```
 
-## How can I deploy this project?
+## Smoke tests (curl)
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+> Reemplaza `<WORKER_URL>` por tu URL real, por ejemplo `https://fortnite-coins-market-api.<subdomain>.workers.dev`.
 
-## Can I connect a custom domain to my Lovable project?
+```bash
+curl -i <WORKER_URL>/health
+```
 
-Yes, you can!
+```bash
+curl -i -X POST <WORKER_URL>/api/room/join \
+  -H "Content-Type: application/json" \
+  -d '{"room_code":"JUANO-ROOM","display_name":"DemoUser","pin":"1234"}'
+```
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+```bash
+curl -i "<WORKER_URL>/api/market?room_code=JUANO-ROOM"
+```
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+```bash
+curl -i "<WORKER_URL>/api/room/state?room_code=JUANO-ROOM&player_code=<PLAYER_CODE>"
+```
+
+```bash
+curl -i -X POST <WORKER_URL>/api/trade/buy \
+  -H "Content-Type: application/json" \
+  -d '{"room_code":"JUANO-ROOM","player_code":"<PLAYER_CODE>","coin":"JUANO","qty":1}'
+```
+
+```bash
+curl -i -X POST <WORKER_URL>/api/trade/sell \
+  -H "Content-Type: application/json" \
+  -d '{"room_code":"JUANO-ROOM","player_code":"<PLAYER_CODE>","coin":"JUANO","qty":1}'
+```
