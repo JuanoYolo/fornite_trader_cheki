@@ -70,6 +70,15 @@ function err(message: string, status = 400, origin: string | null = null): Respo
   return json({ error: message }, status, origin);
 }
 
+function formatSupabaseError(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "unknown supabase error";
+  const value = payload as Record<string, unknown>;
+  const code = typeof value.code === "string" ? value.code : "";
+  const message = typeof value.message === "string" ? value.message : "";
+  const details = typeof value.details === "string" ? value.details : "";
+  return [code, message, details].filter(Boolean).join(" | ") || "unknown supabase error";
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -297,7 +306,8 @@ async function ensurePlayerForMarket(
   });
 
   if (!created.ok || !Array.isArray(created.data) || !created.data.length) {
-    throw new Error("Failed to create player");
+    const detail = formatSupabaseError(created.data);
+    throw new Error(`Failed to create player: ${detail}`);
   }
 
   const player = created.data[0] as Record<string, unknown>;
