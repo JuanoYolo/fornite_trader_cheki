@@ -70,6 +70,15 @@ function err(message: string, status = 400, origin: string | null = null): Respo
   return json({ error: message }, status, origin);
 }
 
+function formatSupabaseError(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "unknown supabase error";
+  const value = payload as Record<string, unknown>;
+  const code = typeof value.code === "string" ? value.code : "";
+  const message = typeof value.message === "string" ? value.message : "";
+  const details = typeof value.details === "string" ? value.details : "";
+  return [code, message, details].filter(Boolean).join(" | ") || "unknown supabase error";
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -353,6 +362,36 @@ async function ensurePlayerForMarket(
     }
   }
 
+  const created = await supabase(env, "room_players?on_conflict=room_code,display_name,market_type", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify({
+      room_code: roomCode,
+      player_identity: playerIdentity,
+      market_type: marketType,
+      player_code: playerCode,
+      display_name: displayName,
+      pin,
+      cash: 100000,
+    }),
+  });
+
+  if (!created.ok || !Array.isArray(created.data) || !created.data.length) {
+  const fallback = await supabase(
+    env,
+    `room_players?room_code=eq.${roomCode}&player_code=eq.${encodeURIComponent(playerCode)}&market_type=eq.${marketType}&limit=1`
+  );
+
+  if (fallback.ok && Array.isArray(fallback.data) && fallback.data.length) {
+    return fallback.data[0] as Record<string, unknown>;
+  }
+
+  const reason = created.ok
+    ? "Create player returned no rows"
+    : describeFailure({ status: created.status, data: created.data });
+  throw new Error(`Failed to create player: ${reason}`);
+}
+  const player = created.data[0] as Record<string, unknown>;
   for (const symbol of Object.keys(COIN_PROFILES)) {
     await supabase(env, "holdings", {
       method: "POST",
