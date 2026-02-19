@@ -25,9 +25,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
-      - name: Install dependencies
+      # Este repo no tiene package-lock.json en la raíz.
+      # npm ci y cache:npm exigen lockfile y rompen el workflow en GitHub-hosted runners.
+      - name: Install dependencies (no lockfile)
         run: npm install
 
       - name: Build
