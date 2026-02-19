@@ -318,7 +318,6 @@ async function ensurePlayerForMarket(
   return player;
 }
 
-
 async function resolvePlayerCodeForMarket(env: Env, roomCode: string, playerCode: string, marketType: MarketType): Promise<string | null> {
   const exact = await supabase(env, `room_players?room_code=eq.${roomCode}&player_code=eq.${playerCode}&market_type=eq.${marketType}&limit=1`);
   if (exact.ok && Array.isArray(exact.data) && exact.data.length) return playerCode;
