@@ -70,7 +70,6 @@ function err(message: string, status = 400, origin: string | null = null): Respo
   return json({ error: message }, status, origin);
 }
 
-
 function formatSupabaseError(payload: unknown): string {
   if (!payload || typeof payload !== "object") return "unknown supabase error";
   const value = payload as Record<string, unknown>;
@@ -328,7 +327,6 @@ async function ensurePlayerForMarket(
 
   return player;
 }
-
 
 async function resolvePlayerCodeForMarket(env: Env, roomCode: string, playerCode: string, marketType: MarketType): Promise<string | null> {
   const exact = await supabase(env, `room_players?room_code=eq.${roomCode}&player_code=eq.${playerCode}&market_type=eq.${marketType}&limit=1`);
