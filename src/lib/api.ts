@@ -1,5 +1,7 @@
 import type { MarketType } from "@/lib/marketType";
 
+export type ChartRange = "24h" | "7d" | "30d" | "90d" | "all";
+
 const rawApiBase = import.meta.env.VITE_API_BASE || "";
 const API_BASE = rawApiBase.replace(/\/+$/, "");
 
@@ -72,6 +74,7 @@ export interface CoinMarket {
   fundamental_component: number;
   fundamental_score: number;
   fundamental_status: "live" | "cached" | "fallback";
+  range?: ChartRange;
 }
 
 export interface MarketResponse {
@@ -100,6 +103,32 @@ export interface TradeResult {
   holding_qty: number;
 }
 
+
+export interface FortniteSummary {
+  coin_symbol: string;
+  scope: MarketType;
+  player: string;
+  platform: "pc" | "xbl";
+  status: "live" | "cached" | "fallback";
+  current: {
+    wins: number;
+    kills: number;
+    matches: number;
+    kd: number;
+    winRate: number;
+    score: number;
+  };
+  deltas: {
+    kills_24h: number;
+    kills_7d: number;
+    wins_24h: number;
+    wins_7d: number;
+    matches_24h: number;
+    matches_7d: number;
+  };
+  season_window_days: number | null;
+}
+
 export const api = {
   join(room_code: string, display_name: string, pin: string) {
     return request<JoinResponse>("/api/room/join", {
@@ -108,9 +137,9 @@ export const api = {
     });
   },
 
-  market(room_code: string, marketType: MarketType) {
+  market(room_code: string, marketType: MarketType, range: ChartRange = "24h") {
     return request<MarketResponse>(
-      `/api/market?room_code=${encodeURIComponent(room_code)}&market_type=${encodeURIComponent(marketType)}`
+      `/api/market?room_code=${encodeURIComponent(room_code)}&market_type=${encodeURIComponent(marketType)}&range=${encodeURIComponent(range)}`
     );
   },
 
@@ -132,5 +161,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ room_code, player_code, coin, qty, market_type: marketType }),
     });
+  },
+
+  summary(coin: string, marketType: MarketType) {
+    return request<FortniteSummary>(`/api/fortnite/summary?coin=${encodeURIComponent(coin)}&scope=${encodeURIComponent(marketType)}`);
   },
 };

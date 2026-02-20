@@ -7,6 +7,7 @@ interface Env {
 type MarketType = "season" | "historical";
 type ScopeType = "season" | "historical";
 type FundamentalStatus = "live" | "cached" | "fallback";
+type ChartRange = "24h" | "7d" | "30d" | "90d" | "all";
 
 type FortniteNormalized = {
   player: string;
@@ -28,6 +29,7 @@ const STATS_TTL_MINUTES = 10;
 // Final price blend: 20% trading + 80% Fortnite fundamentals.
 const PRICE_BLEND_ALPHA = 0.2;
 const FUNDAMENTAL_DELTA_CLAMP = 0.25;
+const SEASON_RETENTION_DAYS = 90;
 
 const COIN_PROFILES: Record<string, { player: string; platform: "pc" | "xbl"; seedPrice: number }> = {
   JUANO: { player: "JuanoYoloXd", platform: "pc", seedPrice: 50000 },
@@ -37,6 +39,27 @@ const COIN_PROFILES: Record<string, { player: string; platform: "pc" | "xbl"; se
 
 function normalizeMarketType(value: string | null): MarketType {
   return value === "historical" ? "historical" : DEFAULT_MARKET;
+}
+
+function normalizeChartRange(value: string | null): ChartRange {
+  if (value === "7d" || value === "30d" || value === "90d" || value === "all") return value;
+  return "24h";
+}
+
+function chartRangeMs(range: ChartRange): number | null {
+  if (range === "24h") return 24 * 60 * 60 * 1000;
+  if (range === "7d") return 7 * 24 * 60 * 60 * 1000;
+  if (range === "30d") return 30 * 24 * 60 * 60 * 1000;
+  if (range === "90d") return 90 * 24 * 60 * 60 * 1000;
+  return null;
+}
+
+function chartPointLimit(range: ChartRange): number {
+  if (range === "24h") return 120;
+  if (range === "7d") return 240;
+  if (range === "30d") return 320;
+  if (range === "90d") return 360;
+  return 400;
 }
 
 function resolveOrigin(origin: string | null): string {
@@ -261,7 +284,102 @@ async function getCachedOrLiveStats(
     }),
   });
 
+  await supabase(env, "fortnite_stats_snapshots?on_conflict=player_name,platform,scope,observed_at", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify({
+      player_name: player,
+      platform,
+      scope,
+      wins: stats.wins,
+      kd: stats.kd,
+      win_rate: stats.winRate,
+      matches: stats.matches,
+      kills: stats.kills,
+      computed_score: stats.score,
+      observed_at: nowIso,
+    }),
+  });
+
+  if (scope === "season") {
+    const cutoffIso = new Date(Date.now() - SEASON_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    await supabase(
+      env,
+      `fortnite_stats_snapshots?player_name=eq.${encodeURIComponent(player)}&platform=eq.${platform}&scope=eq.${scope}&observed_at=lt.${encodeURIComponent(cutoffIso)}`,
+      { method: "DELETE" }
+    );
+  }
+
   return { stats, status: "live" };
+}
+
+type SnapshotRow = {
+  wins: number;
+  kills: number;
+  matches: number;
+  observedAt: string;
+};
+
+async function getSnapshotAtOrBefore(env: Env, player: string, platform: "pc" | "xbl", scope: ScopeType, iso: string): Promise<SnapshotRow | null> {
+  const res = await supabase(
+    env,
+    `fortnite_stats_snapshots?player_name=eq.${encodeURIComponent(player)}&platform=eq.${platform}&scope=eq.${scope}&observed_at=lte.${encodeURIComponent(iso)}&select=wins,kills,matches,observed_at&order=observed_at.desc&limit=1`
+  );
+
+  if (!res.ok || !Array.isArray(res.data) || !res.data.length) return null;
+  const row = res.data[0] as Record<string, unknown>;
+  return {
+    wins: asNumber(row.wins),
+    kills: asNumber(row.kills),
+    matches: asNumber(row.matches),
+    observedAt: String(row.observed_at || ""),
+  };
+}
+
+function computeDelta(current: number, baseline: number | null): number {
+  if (baseline === null) return 0;
+  return Math.max(0, current - baseline);
+}
+
+async function handleFortniteSummary(env: Env, url: URL, origin: string | null) {
+  const coin = String(url.searchParams.get("coin") || "").toUpperCase();
+  const scope: ScopeType = normalizeMarketType(url.searchParams.get("scope")) === "historical" ? "historical" : "season";
+  const profile = COIN_PROFILES[coin];
+  if (!profile) return err("Invalid coin", 400, origin);
+
+  const { stats, status } = await getCachedOrLiveStats(env, profile.player, profile.platform, scope);
+  const now = Date.now();
+  const baseline24 = await getSnapshotAtOrBefore(env, profile.player, profile.platform, scope, new Date(now - 24 * 60 * 60 * 1000).toISOString());
+  const baseline7d = await getSnapshotAtOrBefore(env, profile.player, profile.platform, scope, new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString());
+
+  return json(
+    {
+      coin_symbol: coin,
+      scope,
+      player: profile.player,
+      platform: profile.platform,
+      status,
+      current: {
+        wins: stats.wins,
+        kills: stats.kills,
+        matches: stats.matches,
+        kd: stats.kd,
+        winRate: stats.winRate,
+        score: stats.score,
+      },
+      deltas: {
+        kills_24h: computeDelta(stats.kills, baseline24 ? baseline24.kills : null),
+        kills_7d: computeDelta(stats.kills, baseline7d ? baseline7d.kills : null),
+        wins_24h: computeDelta(stats.wins, baseline24 ? baseline24.wins : null),
+        wins_7d: computeDelta(stats.wins, baseline7d ? baseline7d.wins : null),
+        matches_24h: computeDelta(stats.matches, baseline24 ? baseline24.matches : null),
+        matches_7d: computeDelta(stats.matches, baseline7d ? baseline7d.matches : null),
+      },
+      season_window_days: scope === "season" ? SEASON_RETENTION_DAYS : null,
+    },
+    200,
+    origin
+  );
 }
 
 async function ensurePlayerForMarket(
@@ -523,13 +641,15 @@ async function handleState(env: Env, url: URL, origin: string | null) {
 async function handleMarket(env: Env, url: URL, origin: string | null) {
   const roomCode = url.searchParams.get("room_code");
   const marketType = normalizeMarketType(url.searchParams.get("market_type"));
+  const range = normalizeChartRange(url.searchParams.get("range"));
   if (!roomCode) return err("Missing room_code", 400, origin);
 
   const coinsRes = await supabase(env, "coins?select=coin_symbol,player_label");
   if (!coinsRes.ok || !Array.isArray(coinsRes.data)) return err("Failed to load coins", 500, origin);
 
   const now = Date.now();
-  const h24Ago = now - 24 * 60 * 60 * 1000;
+  const rangeMs = chartRangeMs(range);
+  const cutoff = rangeMs ? now - rangeMs : null;
   const scope: ScopeType = marketType === "historical" ? "historical" : "season";
 
   const result: Record<string, unknown>[] = [];
@@ -541,7 +661,7 @@ async function handleMarket(env: Env, url: URL, origin: string | null) {
 
     const pricesRes = await supabase(
       env,
-      `prices?room_code=eq.${roomCode}&coin_symbol=eq.${symbol}&market_type=eq.${marketType}&order=created_at.desc&limit=200`
+      `prices?room_code=eq.${roomCode}&coin_symbol=eq.${symbol}&market_type=eq.${marketType}&order=created_at.desc&limit=${chartPointLimit(range)}`
     );
 
     const rows = pricesRes.ok && Array.isArray(pricesRes.data) ? pricesRes.data : [];
@@ -568,28 +688,29 @@ async function handleMarket(env: Env, url: URL, origin: string | null) {
     });
 
     const latestPrice = combinedRows.length ? combinedRows[0].price : toCombinedPrice(profile.seedPrice);
-    const recent = combinedRows.filter((r) => r.t >= h24Ago);
-    const prices24 = recent.map((r) => r.price);
+    const recent = cutoff ? combinedRows.filter((r) => r.t >= cutoff) : combinedRows;
+    const pricesInRange = recent.map((r) => r.price);
 
-    const open24 = recent.length ? recent[recent.length - 1].price : latestPrice;
-    const high24 = prices24.length ? Math.max(...prices24) : latestPrice;
-    const low24 = prices24.length ? Math.min(...prices24) : latestPrice;
-    const change24 = open24 ? ((latestPrice - open24) / open24) * 100 : 0;
+    const openRange = recent.length ? recent[recent.length - 1].price : latestPrice;
+    const highRange = pricesInRange.length ? Math.max(...pricesInRange) : latestPrice;
+    const lowRange = pricesInRange.length ? Math.min(...pricesInRange) : latestPrice;
+    const changeRange = openRange ? ((latestPrice - openRange) / openRange) * 100 : 0;
 
     result.push({
       coin_symbol: symbol,
       player_label: String(coin.player_label || symbol),
       market_type: marketType,
       price: Number(latestPrice.toFixed(2)),
-      open24: Number(open24.toFixed(2)),
-      high24: Number(high24.toFixed(2)),
-      low24: Number(low24.toFixed(2)),
-      change24_pct: Number(change24.toFixed(2)),
+      open24: Number(openRange.toFixed(2)),
+      high24: Number(highRange.toFixed(2)),
+      low24: Number(lowRange.toFixed(2)),
+      change24_pct: Number(changeRange.toFixed(2)),
+      range,
       trading_price_component: Number(tradingLatest.toFixed(2)),
       fundamental_component: Number((combinePrice(profile.seedPrice, profile.seedPrice, fundamentalScore)).toFixed(2)),
       fundamental_score: Number(fundamentalScore.toFixed(4)),
       fundamental_status: status,
-      series: combinedRows.slice(0, 60).reverse(),
+      series: combinedRows.slice(0, chartPointLimit(range)).reverse(),
     });
   }
 
@@ -646,6 +767,7 @@ export default {
     try {
       if (path === "/health" && request.method === "GET") return handleHealth(origin);
       if (path === "/api/fortnite/stats" && request.method === "GET") return handleFortniteStatsDebug(env, url, origin);
+      if (path === "/api/fortnite/summary" && request.method === "GET") return handleFortniteSummary(env, url, origin);
       if (path === "/api/room/join" && request.method === "POST") return handleJoin(env, await request.json(), origin);
       if (path === "/api/room/state" && request.method === "GET") return handleState(env, url, origin);
       if (path === "/api/market" && request.method === "GET") return handleMarket(env, url, origin);
