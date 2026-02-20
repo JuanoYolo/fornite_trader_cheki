@@ -87,10 +87,26 @@ CREATE TABLE IF NOT EXISTS fortnite_stats_cache (
 );
 ALTER TABLE fortnite_stats_cache DISABLE ROW LEVEL SECURITY;
 
+CREATE TABLE IF NOT EXISTS fortnite_stats_snapshots (
+  player_name TEXT NOT NULL,
+  platform TEXT NOT NULL CHECK (platform IN ('pc', 'xbl')),
+  scope TEXT NOT NULL CHECK (scope IN ('season', 'historical')),
+  wins NUMERIC NOT NULL DEFAULT 0,
+  kd NUMERIC NOT NULL DEFAULT 0,
+  win_rate NUMERIC NOT NULL DEFAULT 0,
+  matches NUMERIC NOT NULL DEFAULT 0,
+  kills NUMERIC NOT NULL DEFAULT 0,
+  computed_score NUMERIC NOT NULL DEFAULT 0.5,
+  observed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (player_name, platform, scope, observed_at)
+);
+ALTER TABLE fortnite_stats_snapshots DISABLE ROW LEVEL SECURITY;
+
 CREATE INDEX IF NOT EXISTS idx_prices_room_coin_market_time ON prices (room_code, coin_symbol, market_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_room_coin_market_time ON trades (room_code, coin_symbol, market_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_room_players_room_market ON room_players (room_code, market_type);
 CREATE INDEX IF NOT EXISTS idx_stats_cache_exp ON fortnite_stats_cache (expires_at DESC);
+CREATE INDEX IF NOT EXISTS idx_stats_snapshots_lookup ON fortnite_stats_snapshots (player_name, platform, scope, observed_at DESC);
 
 -- Seed
 INSERT INTO coins (coin_symbol, player_label, epic_display_name, platform, seed_price)

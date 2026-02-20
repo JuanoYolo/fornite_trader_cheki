@@ -19,10 +19,11 @@ Cada market_type tiene cash/holdings/trades/prices separados.
 - `GET /health`
 - `POST /api/room/join`
 - `GET /api/room/state?room_code=...&player_code=...&market_type=season|historical`
-- `GET /api/market?room_code=...&market_type=season|historical`
+- `GET /api/market?room_code=...&market_type=season|historical&range=24h|7d|30d|90d|all`
 - `POST /api/trade/buy`
 - `POST /api/trade/sell`
 - `GET /api/fortnite/stats?player=<name>&platform=<pc|xbl>&scope=<season|historical>` (debug)
+- `GET /api/fortnite/summary?coin=<symbol>&scope=<season|historical>` (current + deltas 24h/7d)
 
 ## Fortnite-API usage (exacto)
 
@@ -33,6 +34,12 @@ Worker consulta:
 Mapeo (normalizado):
 - `wins`, `kd`, `winRate`, `matches`, `kills`
 - score fundamental: `0.5*kdNorm + 0.3*winRateNorm + 0.2*winsNorm`
+
+Histórico de métricas:
+- `fortnite_stats_cache`: último snapshot cacheado por jugador/plataforma/scope (TTL corto).
+- `fortnite_stats_snapshots`: histórico append-only para calcular deltas 24h/7d.
+  - En `season` se retiene ~90 días (ventana de temporada).
+  - En `historical` se conserva histórico completo.
 
 ## Variables y secretos
 
