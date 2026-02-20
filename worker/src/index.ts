@@ -25,7 +25,8 @@ const ALLOWED_METHODS = "GET,POST,OPTIONS";
 const ALLOWED_HEADERS = "content-type,authorization";
 const DEFAULT_MARKET: MarketType = "season";
 const STATS_TTL_MINUTES = 10;
-const PRICE_BLEND_ALPHA = 0.7;
+// Final price blend: 20% trading + 80% Fortnite fundamentals.
+const PRICE_BLEND_ALPHA = 0.2;
 const FUNDAMENTAL_DELTA_CLAMP = 0.25;
 
 const COIN_PROFILES: Record<string, { player: string; platform: "pc" | "xbl"; seedPrice: number }> = {
